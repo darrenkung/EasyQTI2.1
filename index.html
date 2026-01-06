@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QTI 2.1 Package Generator</title>
+    <!-- Tailwind CSS for Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transformation in browser -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+    <!-- JSZip for Zip Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // XML Generation Logic
+        const QTIGenerator = {
+            generateManifest: (questions, testId, title) => {
+                const imsitemRef = questions.map(q =>       
+                    `<resource href="items/${q.id}.xml" type="imsqti_item_xmlv2p1">
+                        <metadata/>
+                        <file href="items/${q.id}.xml"/>
+                    </resource>`
+                ).join('');
+
+                return `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
+    xmlns:imsmd="http://www.imsglobal.org/xsd/imsmd_v1p2"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:imsqti="http://www.imsglobal.org/xsd/imsqti_metadata_v2p1"
+    xsi:schemaLocation="http://www.imsglobal.org/xsd/imscp_v1p1 imscp_v1p1.xsd http://www.imsglobal.org/xsd/imsmd_v1p2 imsmd_v1p2p4.xsd http://www.imsglobal.org/xsd/imsqti_metadata_v2p1 http://www.imsglobal.org/xsd/qti/qtiv2p1/imsqti_metadata_v2p1.xsd">
+    <metadata>
+        <schema>IMS Content</schema>
+        <schemaversion>1.1</schemaversion>
+        <imsmd:lom>
+            <imsmd:general>
+                <imsmd:identifier>${title}</imsmd:identifier>
+                <imsmd:title>
+                    <imsmd:langstring xml:lang="en">${title}</imsmd:langstring>
+                </imsmd:title>
+                <imsmd:language>en</imsmd:language>
+            </imsmd:general>
+            <imsmd:lifecycle>
+                <imsmd:version><imsmd:langstring xml:lang="en">2.1</imsmd:langstring></imsmd:version>
+                <imsmd:status>
+                    <imsmd:source><imsmd:langstring xml:lang="en">LOMv1.0</imsmd:langstring></imsmd:source>
+                    <imsmd:value><imsmd:langstring xml:lang="x-none">Final</imsmd:langstring></imsmd:value>
+                </imsmd:status>
+            </imsmd:lifecycle>
+        </imsmd:lom>
+    </metadata>
+    <organizations/>
+    <resources>
+        <resource href="assessment_test.xml" type="imsqti_test_xmlv2p1">
+            <metadata/>
+            <file href="assessment_test.xml"/>
+        </resource>
+        ${imsitemRef}
+    </resources>
+</manifest>`;
+            },
+
+            generateTestXml: (questions, testId, title) => {
+                const asmitemRef = questions.map(q => 
+                    `<assessmentItemRef href="items/${q.id}.xml" identifier="${q.id}"/>`
+                ).join('');
+
+                return `<?xml version="1.0" encoding="utf-8"?>
+<assessmentTest xmlns="http://www.imsglobal.org/xsd/imsqti_v2p1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" title="${title}" xsi:schemaLocation="http://www.imsglobal.org/xsd/imsqti_v2p1 http://www.imsglobal.org/xsd/qti/qtiv2p1/imsqti_v2p1.xsd">
+    <testPart navigationMode="linear" submissionMode="individual">
+        <assessmentSection title="${title}" visible="true" identifier="section_1">
+            ${asmitemRef}
+        </assessmentSection>
+    </testPart>
+</assessmentTest>`;
+            },
+
+            generateItemXml: (q) => {
+                const optionsArray = q.options.split('\n').filter(line => line.trim() !== '');
+                const choices = optionsArray.map((text, index) => 
+                    `<simpleChoice identifier="choice_${index}">${text.trim()}</simpleChoice>`
+                ).join('');
+
+                const internalCorrectIndex = Math.max(0, q.correctAnswerIndex - 1);
+
+                return `<?xml version="1.0" encoding="utf-8"?>
+<assessmentItem adaptive="false" identifier="${q.id}" timeDependent="false" title="${q.title}" 
+xmlns="http://www.imsglobal.org/xsd/imsqti_v2p1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+xsi:schemaLocation="http://www.imsglobal.org/xsd/imsqti_v2p1 http://www.imsglobal.org/xsd/qti/qtiv2p1/imsqti_v2p1.xsd">
+  <responseDeclaration baseType="identifier" cardinality="single" identifier="RESPONSE">
+      <correctResponse><value>choice_${internalCorrectIndex}</value></correctResponse>
+  </responseDeclaration>
+  <outcomeDeclaration baseType="float" cardinality="single" identifier="SCORE" />
+  <itemBody>
+    <choiceInteraction responseIdentifier="RESPONSE" shuffle="true" maxChoices="1">
+       <prompt>${q.prompt}</prompt>
+        ${choices}
+      </choiceInteraction>
+    </itemBody>
+  <responseProcessing template="http://www.imsglobal.org/question/qti_v2p1/rptemplates/match_correct" />
+</assessmentItem>`;
+            }
+        };
+
+        const App = () => {
+            const [questions, setQuestions] = useState([
+                { id: crypto.randomUUID(), title: 'Question 1', prompt: '', options: '', correctAnswerIndex: 1 }
+            ]);
+            const [testTitle, setTestTitle] = useState('My Assessment');
+
+            useEffect(() => {
+                // Initialize Lucide icons after render
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [questions]);
+
+            const addQuestion = () => {
+                setQuestions([...questions, { 
+                    id: crypto.randomUUID(), 
+                    title: `Question ${questions.length + 1}`, 
+                    prompt: '', 
+                    options: '', 
+                    correctAnswerIndex: 1 
+                }]);
+            };
+
+            const removeQuestion = (id) => {
+                if (questions.length > 1) {
+                    setQuestions(questions.filter(q => q.id !== id));
+                }
+            };
+
+            const updateQuestion = (id, field, value) => {
+                setQuestions(questions.map(q => q.id === id ? { ...q, [field]: value } : q));
+            };
+
+            const downloadPackage = async () => {
+                const zip = new window.JSZip();
+                const testId = `test_${Date.now()}`;
+
+                zip.file("imsmanifest.xml", QTIGenerator.generateManifest(questions, testId, testTitle));
+                zip.file("assessment_test.xml", QTIGenerator.generateTestXml(questions, testId, testTitle));
+
+                const itemsFolder = zip.folder("items");
+                questions.forEach(q => {
+                    itemsFolder.file(`${q.id}.xml`, QTIGenerator.generateItemXml(q));
+                });
+
+                const content = await zip.generateAsync({ type: "blob" });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = `${testTitle.replace(/\s+/g, '_')}_QTI_2.1.zip`;
+                link.click();
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 text-slate-900">
+                    <div className="max-w-4xl mx-auto">
+                        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                            <div>
+                                <h1 className="text-3xl font-bold text-indigo-900 flex items-center gap-2">
+                                    <i data-lucide="package" className="w-8 h-8 text-indigo-600"></i> QTI 2.1 Generator
+                                </h1>
+                                <p className="text-slate-500">GitHub Ready Single-File Version</p>
+                            </div>
+                            <button 
+                                onClick={downloadPackage}
+                                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-lg active:scale-95"
+                            >
+                                <i data-lucide="download" className="w-5 h-5"></i> Export QTI Zip
+                            </button>
+                        </header>
+
+                        <div className="grid grid-cols-1 gap-6">
+                            <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                                <div className="flex items-center gap-2 mb-4 text-indigo-900 font-semibold">
+                                    <i data-lucide="file-code" className="w-5 h-5"></i>
+                                    <h2>Assessment Metadata</h2>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Test Title</label>
+                                    <input 
+                                        type="text" 
+                                        value={testTitle}
+                                        onChange={(e) => setTestTitle(e.target.value)}
+                                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-lg font-medium"
+                                    />
+                                </div>
+                            </section>
+
+                            <div className="space-y-6">
+                                {questions.map((q, idx) => (
+                                    <div key={q.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative transition-all hover:border-indigo-200">
+                                        <div className="flex justify-between items-center mb-6">
+                                            <div className="flex items-center gap-3">
+                                                <span className="bg-indigo-100 text-indigo-700 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold">
+                                                    {idx + 1}
+                                                </span>
+                                                <h3 className="font-bold text-slate-700">Question Content</h3>
+                                            </div>
+                                            <button 
+                                                onClick={() => removeQuestion(q.id)}
+                                                className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                            >
+                                                <i data-lucide="trash-2" className="w-5 h-5"></i>
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                            <div className="space-y-4">
+                                                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Question Stem</label>
+                                                <textarea 
+                                                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl h-40 focus:ring-2 focus:ring-indigo-500 outline-none resize-none transition-all"
+                                                    value={q.prompt}
+                                                    onChange={(e) => updateQuestion(q.id, 'prompt', e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="space-y-4">
+                                                <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Options (One per line)</label>
+                                                <textarea 
+                                                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl h-40 focus:ring-2 focus:ring-indigo-500 outline-none font-mono text-sm resize-none transition-all"
+                                                    value={q.options}
+                                                    onChange={(e) => updateQuestion(q.id, 'options', e.target.value)}
+                                                />
+                                                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex items-center justify-between">
+                                                    <div className="flex flex-col">
+                                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-tight">Correct Option Number</label>
+                                                        <span className="text-[10px] text-slate-400 leading-none mt-0.5">(Line 1 = 1)</span>
+                                                    </div>
+                                                    <input 
+                                                        type="number" 
+                                                        min="1"
+                                                        className="w-16 p-2 bg-white border border-slate-200 rounded-lg text-center font-bold text-indigo-600 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                        value={q.correctAnswerIndex}
+                                                        onChange={(e) => updateQuestion(q.id, 'correctAnswerIndex', parseInt(e.target.value) || 1)}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            <button 
+                                onClick={addQuestion}
+                                className="w-full py-6 border-2 border-dashed border-slate-300 rounded-2xl text-slate-400 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/50 transition-all font-bold flex flex-col items-center gap-1"
+                            >
+                                <i data-lucide="plus" className="w-6 h-6"></i>
+                                <span>Add New Question</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
